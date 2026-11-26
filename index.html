@@ -1,0 +1,327 @@
+<!doctype html>
+<html lang="de">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover,user-scalable=no">
+<meta name="theme-color" content="#000000">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black">
+<title>LED-Simulator</title>
+<style>
+:root{
+  --bg:#000;--card:#121926;--line:#243046;--text:#e7edf6;--muted:#8b98ad;--accent:#3ac790;--led:#ff1a1a;--warn:#e9a84b;
+  color-scheme:dark;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;
+}
+*{box-sizing:border-box;-webkit-tap-highlight-color:transparent}
+html,body{margin:0;height:100%;background:var(--bg);color:var(--text);overflow:hidden}
+body{display:flex;flex-direction:column;padding:env(safe-area-inset-top) 0 env(safe-area-inset-bottom)}
+
+/* LED-Fläche */
+#stage{flex:1;position:relative;display:flex;align-items:center;justify-content:center;min-height:0;touch-action:manipulation}
+#led{width:min(46vmin,260px);aspect-ratio:1;border-radius:50%;background:#1a0606;border:2px solid #2a0c0c}
+#led.on{background:var(--led);border-color:#ff6b6b;box-shadow:0 0 30px 10px rgba(255,30,30,.55)}
+#hud{position:absolute;left:0;right:0;bottom:10px;text-align:center;font-size:13px;color:#4a5466;font-variant-numeric:tabular-nums;pointer-events:none}
+#hud b{color:#6c7891;font-weight:600}
+#tapHint{position:absolute;top:10px;left:0;right:0;text-align:center;font-size:12px;color:#3a4352;pointer-events:none}
+
+/* Bedienfeld */
+#panel{background:var(--card);border-top:1px solid var(--line);border-radius:18px 18px 0 0;padding:14px 16px 16px;max-height:62vh;overflow:auto}
+body.hidden #panel{display:none}
+h1{font-size:16px;margin:0 0 2px}
+.muted{color:var(--muted);font-size:12px}
+.row{display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin-top:12px}
+.row label{flex:1 1 130px;color:var(--muted);font-size:13px}
+.row .ctl{flex:2 1 170px;display:flex;gap:8px;align-items:center}
+input[type=range]{flex:1;accent-color:var(--accent)}
+input[type=number],select{background:#0b111b;color:var(--text);border:1px solid var(--line);border-radius:8px;padding:8px;font:inherit;width:100%}
+input[type=number].small{width:92px;flex:none}
+.seg{display:flex;background:#0b111b;border:1px solid var(--line);border-radius:10px;padding:3px;gap:3px;margin-top:12px}
+.seg button{flex:1;background:transparent;color:var(--muted);border:0;border-radius:7px;padding:8px 4px;font:inherit;font-size:13px;font-weight:600}
+.seg button.active{background:#22324a;color:var(--accent)}
+.btns{display:flex;gap:8px;flex-wrap:wrap;margin-top:12px}
+button.b{background:#22324a;color:var(--text);border:0;border-radius:9px;padding:9px 12px;font:inherit;font-size:13px;font-weight:600}
+button.b.accent{background:var(--accent);color:#06170f}
+button.b.dev.active{outline:2px solid var(--accent)}
+.stats{display:grid;grid-template-columns:repeat(3,1fr);gap:8px;margin-top:12px}
+.stat{background:#0b111b;border-radius:10px;padding:8px 10px}
+.stat span{display:block;font-size:11px;color:var(--muted)}
+.stat strong{font-size:17px;font-variant-numeric:tabular-nums}
+#warn{color:var(--warn);font-size:12px;margin-top:8px;min-height:1em}
+#log{margin-top:10px;font-size:12px;color:#b9c6d8;max-height:120px;overflow:auto;font-variant-numeric:tabular-nums}
+#log div{padding:3px 0;border-bottom:1px solid #1b2333}
+.hide{display:none!important}
+</style>
+</head>
+<body>
+<div id="stage">
+  <div id="tapHint">Auf die schwarze Fläche tippen blendet die Bedienung aus/ein</div>
+  <div id="led"></div>
+  <div id="hud"><b id="hudW">–</b> W · <span id="hudN">0</span> Impulse</div>
+</div>
+
+<div id="panel">
+  <h1>⚡ LED-Simulator</h1>
+  <div class="muted">Blinkt wie die Impuls-LED eines Stromzählers – zum Testen der PC-App ohne echten Zähler.</div>
+
+  <div class="seg" id="modes">
+    <button data-mode="const" class="active">Konstant</button>
+    <button data-mode="house">Haushalt</button>
+    <button data-mode="manual">Geräte</button>
+  </div>
+
+  <div class="row" id="rowPower">
+    <label for="power">Leistung</label>
+    <div class="ctl"><input id="power" type="range" min="0" max="400" step="1"><input id="powerNum" class="small" type="number" min="1" max="20000" step="1"></div>
+  </div>
+  <div class="row" id="rowBase">
+    <label for="base">Grundlast (W)</label>
+    <div class="ctl"><input id="base" type="number" min="0" max="5000" step="5" value="150"></div>
+  </div>
+
+  <div class="btns" id="devices"></div>
+
+  <div class="row">
+    <label for="imp">Impulse je kWh</label>
+    <div class="ctl"><select id="imp"><option>500</option><option>1000</option><option>2000</option><option selected>2500</option><option>10000</option></select></div>
+  </div>
+  <div class="row">
+    <label for="flash">Blitzdauer</label>
+    <div class="ctl"><input id="flash" type="range" min="16" max="200" step="2" value="60"><span id="flashTxt" class="muted" style="width:52px;text-align:right">60 ms</span></div>
+  </div>
+
+  <div class="stats">
+    <div class="stat"><span>Leistung jetzt</span><strong id="sW">–</strong></div>
+    <div class="stat"><span>Impulsabstand</span><strong id="sI">–</strong></div>
+    <div class="stat"><span>Impulse</span><strong id="sN">0</strong></div>
+    <div class="stat"><span>Energie</span><strong id="sE">0</strong></div>
+    <div class="stat"><span>Laufzeit</span><strong id="sT">0:00</strong></div>
+    <div class="stat"><span>Ø Leistung</span><strong id="sA">–</strong></div>
+  </div>
+  <div id="warn"></div>
+
+  <div class="btns">
+    <button class="b accent" id="run">Pause</button>
+    <button class="b" id="reset">Zähler zurücksetzen</button>
+    <button class="b" id="full">Vollbild &amp; wach halten</button>
+  </div>
+  <div id="log"></div>
+  <p class="muted" style="margin-bottom:0">Tipp: Display-Helligkeit hoch, Handy 10–30 cm vor die Webcam, in der PC-App „LED-Farbe: Rot“. Die Liste oben zeigt, wann Geräte geschaltet haben – damit lässt sich „Verbraucher finden“ prüfen.</p>
+</div>
+
+<script>
+(() => {
+'use strict';
+const $ = id => document.getElementById(id);
+const fmt = (n, d = 0) => n.toLocaleString('de-DE', { minimumFractionDigits: d, maximumFractionDigits: d });
+
+// Geräte: Leistung, Laufzeit (s) bei Einzelstart; "cycle" = Kühlschrank-artig
+const DEVICES = [
+  { id: 'fridge', name: 'Kühlschrank', w: 85, cycle: { on: 12 * 60, off: 28 * 60 } },
+  { id: 'kettle', name: 'Wasserkocher', w: 2000, run: 180 },
+  { id: 'micro', name: 'Mikrowelle', w: 900, run: 240 },
+  { id: 'tv', name: 'Fernseher', w: 110, run: 3600 },
+  { id: 'heater', name: 'Heizlüfter', w: 1800, run: 1200 },
+  { id: 'lamp', name: 'Lampe', w: 40, run: 1800 },
+];
+const STORE = 'led-simulator-v1';
+
+let mode = 'const', running = true;
+let pulses = 0, energyWs = 0, accWs = 0, startedAt = performance.now(), activeMs = 0;
+let lastFrame = performance.now(), flashUntil = 0, lastPulseAt = null, lastInterval = null;
+let simTime = 0;                       // Sekunden seit Start (nur während „läuft“)
+const active = new Map();              // id -> Ende (simTime) oder Infinity
+let fridgePhase = 0, nextRandomAt = 600;
+
+// ---------- Einstellungen ----------
+function load() {
+  try { return JSON.parse(localStorage.getItem(STORE) || '{}'); } catch { return {}; }
+}
+function save() {
+  try {
+    localStorage.setItem(STORE, JSON.stringify({ mode, power: Number($('powerNum').value), base: Number($('base').value), imp: $('imp').value, flash: Number($('flash').value) }));
+  } catch { /* privater Modus */ }
+}
+const sliderToW = v => Math.round(Math.pow(10, v / 100));            // 0..400 -> 1..10000 W (logarithmisch)
+const wToSlider = w => Math.round(Math.log10(Math.max(1, w)) * 100);
+
+const saved = load();
+$('powerNum').value = saved.power || 500;
+$('power').value = wToSlider(Number($('powerNum').value));
+if (saved.base != null) $('base').value = saved.base;
+if (saved.imp) $('imp').value = saved.imp;
+if (saved.flash) $('flash').value = saved.flash;
+$('flashTxt').textContent = $('flash').value + ' ms';
+
+$('power').oninput = () => { $('powerNum').value = sliderToW(Number($('power').value)); save(); };
+$('powerNum').oninput = () => { $('power').value = wToSlider(Number($('powerNum').value) || 1); save(); };
+$('base').oninput = save;
+$('imp').onchange = save;
+$('flash').oninput = () => { $('flashTxt').textContent = $('flash').value + ' ms'; save(); };
+
+// ---------- Modus ----------
+function setMode(m) {
+  mode = m;
+  document.querySelectorAll('#modes button').forEach(b => b.classList.toggle('active', b.dataset.mode === m));
+  $('rowPower').classList.toggle('hide', m !== 'const');
+  $('rowBase').classList.toggle('hide', m === 'const');
+  $('devices').classList.toggle('hide', m === 'const');
+  if (m !== 'const') log(m === 'house' ? 'Modus Haushalt: Kühlschrank-Zyklus + zufällige Geräte' : 'Modus Geräte: per Knopf schalten');
+  if (m === 'house') { active.set('fridge', Infinity); fridgePhase = simTime; nextRandomAt = simTime + 300; }
+  renderDevices();
+  save();
+}
+document.querySelectorAll('#modes button').forEach(b => b.onclick = () => setMode(b.dataset.mode));
+
+function renderDevices() {
+  const box = $('devices');
+  box.replaceChildren();
+  for (const d of DEVICES) {
+    const b = document.createElement('button');
+    b.className = 'b dev' + (active.has(d.id) ? ' active' : '');
+    b.textContent = `${d.name} ${fmt(d.w)} W`;
+    b.onclick = () => toggleDevice(d);
+    box.append(b);
+  }
+}
+function toggleDevice(d) {
+  if (active.has(d.id)) { active.delete(d.id); log(`${d.name} AUS (−${fmt(d.w)} W)`); }
+  else {
+    active.set(d.id, d.cycle ? Infinity : simTime + d.run);
+    if (d.cycle) fridgePhase = simTime;
+    log(`${d.name} AN (+${fmt(d.w)} W)` + (d.run ? ` für ${fmt(d.run / 60)} min` : ''));
+  }
+  renderDevices();
+}
+
+// ---------- Leistung ----------
+function currentWatts() {
+  if (mode === 'const') return Math.max(0, Number($('powerNum').value) || 0);
+  let w = Math.max(0, Number($('base').value) || 0);
+  for (const d of DEVICES) {
+    if (!active.has(d.id)) continue;
+    if (d.cycle) {
+      const t = (simTime - fridgePhase) % (d.cycle.on + d.cycle.off);
+      if (t < d.cycle.on) w += d.w;
+    } else w += d.w;
+  }
+  return w;
+}
+
+let fridgeWasOn = null;
+function updateDevices() {
+  // Laufzeit-Ende
+  for (const d of DEVICES) {
+    const end = active.get(d.id);
+    if (end !== undefined && end !== Infinity && simTime >= end) {
+      active.delete(d.id); log(`${d.name} AUS (−${fmt(d.w)} W)`); renderDevices();
+    }
+  }
+  // Kühlschrank-Kompressor protokollieren
+  const f = DEVICES[0];
+  if (active.has('fridge')) {
+    const on = (simTime - fridgePhase) % (f.cycle.on + f.cycle.off) < f.cycle.on;
+    if (fridgeWasOn !== null && on !== fridgeWasOn) log(`Kühlschrank-Kompressor ${on ? 'AN (+' : 'AUS (−'}${fmt(f.w)} W)`);
+    fridgeWasOn = on;
+  } else fridgeWasOn = null;
+  // Zufallsgeräte im Haushaltsmodus
+  if (mode === 'house' && simTime >= nextRandomAt) {
+    const pool = DEVICES.filter(d => !d.cycle && !active.has(d.id));
+    if (pool.length) toggleDevice(pool[Math.floor(Math.random() * pool.length)]);
+    nextRandomAt = simTime + 600 + Math.random() * 1200;   // alle 10–30 min
+  }
+}
+
+// ---------- Hauptschleife ----------
+const led = $('led');
+function frame(now) {
+  let dt = (now - lastFrame) / 1000;
+  if (dt > 2) dt = 0;                                    // Seite war im Hintergrund: diese Zeit nicht simulieren
+  lastFrame = now;
+  if (running) {
+    simTime += dt;
+    activeMs += dt * 1000;
+    updateDevices();
+    const w = currentWatts();
+    const imp = Number($('imp').value);
+    const wsPerPulse = 3600000 / imp;
+    accWs += w * dt;
+    energyWs += w * dt;
+    while (accWs >= wsPerPulse) {
+      accWs -= wsPerPulse;
+      pulses++;
+      if (lastPulseAt !== null) lastInterval = (now - lastPulseAt) / 1000;
+      lastPulseAt = now;
+      flashUntil = now + Number($('flash').value);
+    }
+  }
+  led.classList.toggle('on', now < flashUntil);
+  requestAnimationFrame(frame);
+}
+requestAnimationFrame(frame);
+
+// ---------- Anzeige ----------
+function updateStats() {
+  const w = currentWatts(), imp = Number($('imp').value), flash = Number($('flash').value);
+  const interval = 3600 / (imp * Math.max(w, 0.001) / 1000);
+  $('sW').textContent = fmt(w) + ' W';
+  $('hudW').textContent = fmt(w);
+  $('sI').textContent = w > 0 ? (interval >= 10 ? fmt(interval, 0) : fmt(interval, 2)) + ' s' : '–';
+  $('sN').textContent = fmt(pulses);
+  $('hudN').textContent = fmt(pulses);
+  $('sE').textContent = energyWs >= 3.6e6 ? fmt(energyWs / 3.6e6, 3) + ' kWh' : fmt(energyWs / 3600, 1) + ' Wh';
+  const secs = activeMs / 1000;
+  $('sT').textContent = `${Math.floor(secs / 3600)}:${String(Math.floor(secs / 60) % 60).padStart(2, '0')}:${String(Math.floor(secs) % 60).padStart(2, '0')}`;
+  $('sA').textContent = secs > 1 ? fmt(energyWs / secs) + ' W' : '–';
+
+  let warn = '';
+  if (w > 0 && interval * 1000 < flash * 2) warn = 'Blitze folgen zu dicht – Leistung senken oder Blitzdauer verkürzen.';
+  else if (w > 0 && interval < 0.15) warn = 'Unter 150 ms Abstand kann eine 30-fps-Webcam Impulse verschmelzen.';
+  else if (flash < 34) warn = 'Blitze unter ~34 ms können von einer 30-fps-Webcam verpasst werden.';
+  $('warn').textContent = warn;
+}
+setInterval(updateStats, 250);
+
+function log(text) {
+  const now = new Date();
+  const div = document.createElement('div');
+  div.textContent = now.toLocaleTimeString('de-DE') + ' · ' + text;
+  $('log').prepend(div);
+  while ($('log').children.length > 60) $('log').lastChild.remove();
+}
+
+// ---------- Knöpfe ----------
+$('run').onclick = () => {
+  running = !running;
+  $('run').textContent = running ? 'Pause' : 'Weiter';
+  log(running ? 'Fortgesetzt' : 'Pausiert');
+};
+$('reset').onclick = () => {
+  pulses = 0; energyWs = 0; accWs = 0; activeMs = 0; lastPulseAt = null; lastInterval = null;
+  log('Zähler zurückgesetzt');
+  updateStats();
+};
+$('stage').onclick = () => document.body.classList.toggle('hidden');
+
+let wakeLock = null;
+async function keepAwake() {
+  try { if ('wakeLock' in navigator) { wakeLock = await navigator.wakeLock.request('screen'); } } catch { /* nicht erlaubt */ }
+}
+document.addEventListener('visibilitychange', () => {
+  if (document.visibilityState === 'visible' && wakeLock !== null) keepAwake();
+  if (document.visibilityState === 'hidden') log('Seite im Hintergrund – Simulation pausiert');
+});
+$('full').onclick = async () => {
+  await keepAwake();
+  try { await document.documentElement.requestFullscreen?.(); } catch { /* iPhone: nicht unterstützt */ }
+  document.body.classList.add('hidden');
+  log(wakeLock ? 'Bildschirm bleibt an' : 'Wach halten nicht verfügbar – Auto-Sperre in den Einstellungen verlängern');
+};
+
+setMode(saved.mode || 'const');
+updateStats();
+log('Simulator gestartet');
+})();
+</script>
+</body>
+</html>
